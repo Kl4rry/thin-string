@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2018"
 authors = ["Axel Kappel <axel.e.kappel@gmail.com>"]
 license = "MIT"
-description = "A String with a smaller stack footprint "
+description = "A String with a smaller stack footprint"
+docs = "https://docs.rs/thin-string"
+repository = "https://github.com/Kl4rry/thin-string"
+homepage = "https://github.com/Kl4rry/thin-string"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -606,6 +606,7 @@ impl PartialEq for ThinString {
     }
 }
 
+#[doc(hidden)]
 macro_rules! impl_eq {
     ($lhs:ty, $rhs: ty) => {
         #[allow(unused_lifetimes)]
