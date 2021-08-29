@@ -1,11 +1,11 @@
 [package]
 name = "thin-string"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2018"
 authors = ["Axel Kappel <axel.e.kappel@gmail.com>"]
 license = "MIT"
 description = "A String with a smaller stack footprint"
-docs = "https://docs.rs/thin-string"
+documentation = "https://docs.rs/thin-string"
 repository = "https://github.com/Kl4rry/thin-string"
 homepage = "https://github.com/Kl4rry/thin-string"
 
