@@ -808,8 +808,23 @@ impl FromStr for ThinString {
 }
 
 impl ToString for ThinString {
+    #[inline]
     fn to_string(&self) -> String {
         unsafe { String::from_utf8_unchecked(self.vec.to_vec()) }
+    }
+}
+
+impl From<String> for ThinString {
+    #[inline]
+    fn from(string: String) -> ThinString {
+        ThinString::from(string.as_str())
+    }
+}
+
+impl From<ThinString> for String {
+    #[inline]
+    fn from(string: ThinString) -> String {
+        string.to_string()
     }
 }
 
