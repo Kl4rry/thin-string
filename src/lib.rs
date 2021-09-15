@@ -61,6 +61,7 @@ impl ThinString {
         }
     }
 
+    #[inline]
     pub fn from_utf8_lossy(v: &[u8]) -> ThinString {
         let mut iter = lossy::Utf8Lossy::from_bytes(v).chunks();
 
@@ -93,6 +94,7 @@ impl ThinString {
         res
     }
 
+    #[inline]
     pub fn from_utf16(v: &[u16]) -> Result<ThinString, FromUtf16Error> {
         let mut ret = ThinString::with_capacity(v.len());
         for c in decode_utf16(v.iter().cloned()) {
@@ -387,6 +389,7 @@ impl ThinString {
         self.vec.clear()
     }
 
+    #[inline]
     pub fn drain<R>(&mut self, range: R) -> Drain<'_>
     where
         R: RangeBounds<usize>,
@@ -417,20 +420,24 @@ impl ThinString {
 }
 
 impl FromUtf8Error {
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..]
     }
 
+    #[inline]
     pub fn into_bytes(self) -> ThinVec<u8> {
         self.bytes
     }
 
+    #[inline]
     pub fn utf8_error(&self) -> Utf8Error {
         self.error
     }
 }
 
 impl fmt::Display for FromUtf8Error {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.error, f)
     }
@@ -1010,6 +1017,7 @@ unsafe impl Sync for Drain<'_> {}
 unsafe impl Send for Drain<'_> {}
 
 impl Drop for Drain<'_> {
+    #[inline]
     fn drop(&mut self) {
         unsafe {
             // Use ThinVec::drain. "Reaffirm" the bounds checks to avoid
@@ -1023,6 +1031,7 @@ impl Drop for Drain<'_> {
 }
 
 impl<'a> Drain<'a> {
+    #[inline]
     pub fn as_str(&self) -> &str {
         self.iter.as_str()
     }
