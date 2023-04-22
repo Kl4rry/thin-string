@@ -1070,3 +1070,42 @@ impl From<char> for ThinString {
         c.to_thin_string()
     }
 }
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ThinString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ThinString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Visitor;
+
+        struct ThinStringVisitor;
+
+        impl<'de> Visitor<'de> for ThinStringVisitor {
+            type Value = ThinString;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(v.into())
+            }
+        }
+
+        deserializer.deserialize_str(ThinStringVisitor)
+    }
+}
