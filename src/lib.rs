@@ -1,12 +1,11 @@
-#![feature(try_reserve)]
-#![feature(str_internals)]
+#![feature(utf8_chunks)]
 #![feature(pattern)]
 #![feature(slice_range)]
 #![feature(extend_one)]
 #![feature(min_specialization)]
 #![feature(fmt_internals)]
 
-use core::str::lossy;
+use core::str::Utf8Chunks;
 use std::{
     borrow::Cow,
     char::{decode_utf16, REPLACEMENT_CHARACTER},
@@ -63,10 +62,10 @@ impl ThinString {
 
     #[inline]
     pub fn from_utf8_lossy(v: &[u8]) -> ThinString {
-        let mut iter = lossy::Utf8Lossy::from_bytes(v).chunks();
+        let mut iter = Utf8Chunks::new(v);
 
         let (first_valid, first_broken) = if let Some(chunk) = iter.next() {
-            let lossy::Utf8LossyChunk { valid, broken } = chunk;
+            let (valid, broken) = (chunk.valid(), chunk.invalid());
             if valid.len() == v.len() {
                 debug_assert!(broken.is_empty());
                 return ThinString::from(valid);
@@ -84,7 +83,8 @@ impl ThinString {
             res.push_str(REPLACEMENT);
         }
 
-        for lossy::Utf8LossyChunk { valid, broken } in iter {
+        for chunk in iter {
+            let (valid, broken) = (chunk.valid(), chunk.invalid());
             res.push_str(valid);
             if !broken.is_empty() {
                 res.push_str(REPLACEMENT);
