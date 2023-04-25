@@ -1087,7 +1087,7 @@ impl<'de> serde::Deserialize<'de> for ThinString {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::Visitor;
+        use serde::de::{Error, Unexpected, Visitor};
 
         struct ThinStringVisitor;
 
@@ -1103,6 +1103,16 @@ impl<'de> serde::Deserialize<'de> for ThinString {
                 E: serde::de::Error,
             {
                 Ok(v.into())
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match from_utf8(v) {
+                    Ok(u) => Ok(u.into()),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
             }
         }
 
