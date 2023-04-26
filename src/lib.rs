@@ -1,12 +1,11 @@
-#![feature(try_reserve)]
-#![feature(str_internals)]
+#![feature(utf8_chunks)]
 #![feature(pattern)]
 #![feature(slice_range)]
 #![feature(extend_one)]
 #![feature(min_specialization)]
 #![feature(fmt_internals)]
 
-use core::str::lossy;
+use core::str::Utf8Chunks;
 use std::{
     borrow::Cow,
     char::{decode_utf16, REPLACEMENT_CHARACTER},
@@ -63,10 +62,10 @@ impl ThinString {
 
     #[inline]
     pub fn from_utf8_lossy(v: &[u8]) -> ThinString {
-        let mut iter = lossy::Utf8Lossy::from_bytes(v).chunks();
+        let mut iter = Utf8Chunks::new(v);
 
         let (first_valid, first_broken) = if let Some(chunk) = iter.next() {
-            let lossy::Utf8LossyChunk { valid, broken } = chunk;
+            let (valid, broken) = (chunk.valid(), chunk.invalid());
             if valid.len() == v.len() {
                 debug_assert!(broken.is_empty());
                 return ThinString::from(valid);
@@ -84,7 +83,8 @@ impl ThinString {
             res.push_str(REPLACEMENT);
         }
 
-        for lossy::Utf8LossyChunk { valid, broken } in iter {
+        for chunk in iter {
+            let (valid, broken) = (chunk.valid(), chunk.invalid());
             res.push_str(valid);
             if !broken.is_empty() {
                 res.push_str(REPLACEMENT);
@@ -1068,5 +1068,54 @@ impl From<char> for ThinString {
     #[inline]
     fn from(c: char) -> Self {
         c.to_thin_string()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ThinString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ThinString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Unexpected, Visitor};
+
+        struct ThinStringVisitor;
+
+        impl<'de> Visitor<'de> for ThinStringVisitor {
+            type Value = ThinString;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(v.into())
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match from_utf8(v) {
+                    Ok(u) => Ok(u.into()),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(ThinStringVisitor)
     }
 }
