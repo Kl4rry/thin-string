@@ -1,23 +1,21 @@
-#![feature(utf8_chunks)]
-#![feature(pattern)]
-#![feature(slice_range)]
-#![feature(extend_one)]
-#![feature(min_specialization)]
-#![feature(fmt_internals)]
+#![allow(clippy::missing_safety_doc)]
+#![cfg_attr(feature = "nightly", feature(pattern))]
+#![cfg_attr(feature = "nightly", feature(slice_range))]
+#![cfg_attr(feature = "nightly", feature(extend_one))]
+#![cfg_attr(feature = "nightly", feature(min_specialization))]
+#![cfg_attr(feature = "nightly", feature(fmt_internals))]
 
-use core::str::Utf8Chunks;
 use std::{
     borrow::Cow,
     char::{decode_utf16, REPLACEMENT_CHARACTER},
     fmt, hash,
-    iter::{from_fn, FromIterator, FusedIterator},
+    iter::{FromIterator, FusedIterator},
     ops::{self, Add, AddAssign, Index, IndexMut, Range, RangeBounds},
-    ptr, slice,
-    str::{
-        from_utf8, from_utf8_unchecked, from_utf8_unchecked_mut, pattern::Pattern, Chars, FromStr,
-        Utf8Error,
-    },
+    ptr,
+    str::{from_utf8, from_utf8_unchecked, from_utf8_unchecked_mut, Chars, FromStr, Utf8Error},
 };
+#[cfg(feature = "nightly")]
+use std::{iter::from_fn, slice, str::pattern::Pattern};
 
 use thin_vec::ThinVec;
 
@@ -62,15 +60,15 @@ impl ThinString {
 
     #[inline]
     pub fn from_utf8_lossy(v: &[u8]) -> ThinString {
-        let mut iter = Utf8Chunks::new(v);
+        let mut iter = v.utf8_chunks();
 
-        let (first_valid, first_broken) = if let Some(chunk) = iter.next() {
-            let (valid, broken) = (chunk.valid(), chunk.invalid());
-            if valid.len() == v.len() {
-                debug_assert!(broken.is_empty());
+        let first_valid = if let Some(chunk) = iter.next() {
+            let valid = chunk.valid();
+            if chunk.invalid().is_empty() {
+                debug_assert_eq!(valid.len(), v.len());
                 return ThinString::from(valid);
             }
-            (valid, broken)
+            valid
         } else {
             return ThinString::new();
         };
@@ -79,14 +77,11 @@ impl ThinString {
 
         let mut res = ThinString::with_capacity(v.len());
         res.push_str(first_valid);
-        if !first_broken.is_empty() {
-            res.push_str(REPLACEMENT);
-        }
+        res.push_str(REPLACEMENT);
 
         for chunk in iter {
-            let (valid, broken) = (chunk.valid(), chunk.invalid());
-            res.push_str(valid);
-            if !broken.is_empty() {
+            res.push_str(chunk.valid());
+            if !chunk.invalid().is_empty() {
                 res.push_str(REPLACEMENT);
             }
         }
@@ -212,10 +207,8 @@ impl ThinString {
         ch
     }
 
-    pub fn remove_matches<'a, P>(&'a mut self, pat: P)
-    where
-        P: for<'x> Pattern<'x>,
-    {
+    #[cfg(feature = "nightly")]
+    pub fn remove_matches<P: Pattern>(&mut self, pat: P) {
         use core::str::pattern::Searcher;
 
         let rejections = {
@@ -230,7 +223,7 @@ impl ThinString {
             // be more efficient, so we use it here and do some work to invert
             // matches into rejections since that's what we want to copy below.
             let mut front = 0;
-            let rejections: ThinVec<_> = from_fn(|| {
+            let rejections: Vec<_> = from_fn(|| {
                 let (start, end) = searcher.next_match()?;
                 let prev_front = front;
                 front = end;
@@ -348,7 +341,7 @@ impl ThinString {
             self.vec.as_mut_slice().as_mut_ptr().add(idx + amt),
             len - idx,
         );
-        ptr::copy(bytes.as_ptr(), self.vec.as_mut_ptr().add(idx), amt);
+        ptr::copy_nonoverlapping(bytes.as_ptr(), self.vec.as_mut_ptr().add(idx), amt);
         self.vec.set_len(len + amt);
     }
 
@@ -394,13 +387,54 @@ impl ThinString {
     where
         R: RangeBounds<usize>,
     {
+        #[cfg(not(feature = "nightly"))]
+        /// `std::slice::range()`
+        #[track_caller]
+        #[must_use]
+        pub fn std_slice_range<R>(range: R, bounds: ops::RangeTo<usize>) -> ops::Range<usize>
+        where
+            R: ops::RangeBounds<usize>,
+        {
+            let len = bounds.end;
+
+            let start = match range.start_bound() {
+                ops::Bound::Included(&start) => start,
+                ops::Bound::Excluded(start) => start
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("attempted to index slice from after maximum usize")),
+                ops::Bound::Unbounded => 0,
+            };
+
+            let end = match range.end_bound() {
+                ops::Bound::Included(end) => end
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("attempted to index slice up to maximum usize")),
+                ops::Bound::Excluded(&end) => end,
+                ops::Bound::Unbounded => len,
+            };
+
+            if start > end {
+                panic!("slice index starts at {} but ends at {}", start, end);
+            }
+            if end > len {
+                panic!(
+                    "range end index {} out of range for slice of length {}",
+                    end, len
+                );
+            }
+
+            ops::Range { start, end }
+        }
+        #[cfg(feature = "nightly")]
+        use std::slice::range as std_slice_range;
+
         // Memory safety
         //
         // The ThinString version of Drain does not have the memory safety issues
         // of the vector version. The data is just plain bytes.
         // Because the range removal happens in Drop, if the Drain iterator is leaked,
         // the removal will not happen.
-        let Range { start, end } = slice::range(range, ..self.len());
+        let Range { start, end } = std_slice_range(range, ..self.len());
         assert!(self.is_char_boundary(start));
         assert!(self.is_char_boundary(end));
 
@@ -536,11 +570,13 @@ impl Extend<char> for ThinString {
         iterator.for_each(move |c| self.push(c));
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_one(&mut self, c: char) {
         self.push(c);
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_reserve(&mut self, additional: usize) {
         self.reserve(additional);
@@ -552,11 +588,13 @@ impl<'a> Extend<&'a char> for ThinString {
         self.extend(iter.into_iter().cloned());
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_one(&mut self, &c: &'a char) {
         self.push(c);
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_reserve(&mut self, additional: usize) {
         self.reserve(additional);
@@ -568,6 +606,7 @@ impl<'a> Extend<&'a str> for ThinString {
         iter.into_iter().for_each(move |s| self.push_str(s));
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_one(&mut self, s: &'a str) {
         self.push_str(s);
@@ -585,6 +624,7 @@ impl Extend<ThinString> for ThinString {
         iter.into_iter().for_each(move |s| self.push_str(&s));
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_one(&mut self, s: ThinString) {
         self.push_str(&s);
@@ -596,6 +636,7 @@ impl<'a> Extend<Cow<'a, str>> for ThinString {
         iter.into_iter().for_each(move |s| self.push_str(&s));
     }
 
+    #[cfg(feature = "nightly")]
     #[inline]
     fn extend_one(&mut self, s: Cow<'a, str>) {
         self.push_str(&s);
@@ -770,7 +811,7 @@ impl ops::IndexMut<ops::RangeFrom<usize>> for ThinString {
 impl ops::IndexMut<ops::RangeFull> for ThinString {
     #[inline]
     fn index_mut(&mut self, _index: ops::RangeFull) -> &mut str {
-        unsafe { from_utf8_unchecked_mut(&mut *self.vec) }
+        unsafe { from_utf8_unchecked_mut(&mut self.vec) }
     }
 }
 
@@ -800,7 +841,7 @@ impl ops::Deref for ThinString {
 impl ops::DerefMut for ThinString {
     #[inline]
     fn deref_mut(&mut self) -> &mut str {
-        unsafe { from_utf8_unchecked_mut(&mut *self.vec) }
+        unsafe { from_utf8_unchecked_mut(&mut self.vec) }
     }
 }
 
@@ -811,13 +852,6 @@ impl FromStr for ThinString {
     #[inline]
     fn from_str(s: &str) -> Result<ThinString, Self::Err> {
         Ok(ThinString::from(s))
-    }
-}
-
-impl ToString for ThinString {
-    #[inline]
-    fn to_string(&self) -> String {
-        unsafe { String::from_utf8_unchecked(self.vec.to_vec()) }
     }
 }
 
@@ -839,6 +873,19 @@ pub trait ToThinString {
     fn to_thin_string(&self) -> ThinString;
 }
 
+#[cfg(not(feature = "nightly"))]
+impl<T: fmt::Display + ?Sized> ToThinString for T {
+    #[inline]
+    fn to_thin_string(&self) -> ThinString {
+        use fmt::Write as _;
+        let mut buf = ThinString::new();
+        write!(&mut buf, "{}", self)
+            .expect("a Display implementation returned an error unexpectedly");
+        buf
+    }
+}
+
+#[cfg(feature = "nightly")]
 impl<T: fmt::Display + ?Sized> ToThinString for T {
     #[inline]
     default fn to_thin_string(&self) -> ThinString {
@@ -851,6 +898,7 @@ impl<T: fmt::Display + ?Sized> ToThinString for T {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for char {
     #[inline]
     fn to_thin_string(&self) -> ThinString {
@@ -858,6 +906,7 @@ impl ToThinString for char {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for u8 {
     #[inline]
     fn to_thin_string(&self) -> ThinString {
@@ -876,6 +925,7 @@ impl ToThinString for u8 {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for i8 {
     #[inline]
     fn to_thin_string(&self) -> ThinString {
@@ -897,6 +947,7 @@ impl ToThinString for i8 {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for str {
     #[inline]
     fn to_thin_string(&self) -> ThinString {
@@ -904,6 +955,7 @@ impl ToThinString for str {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for Cow<'_, str> {
     #[inline]
     fn to_thin_string(&self) -> ThinString {
@@ -911,6 +963,7 @@ impl ToThinString for Cow<'_, str> {
     }
 }
 
+#[cfg(feature = "nightly")]
 impl ToThinString for ThinString {
     #[inline]
     fn to_thin_string(&self) -> ThinString {

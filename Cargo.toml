@@ -14,3 +14,7 @@ homepage = "https://github.com/Kl4rry/thin-string"
 [dependencies]
 thin-vec = "0.2.12"
 serde = { version = "1.0", optional = true }
+
+[features]
+default = []
+nightly = []
